@@ -1257,6 +1257,35 @@ img { display: block; max-width: 100%; }
   white-space: nowrap;
 }
 
+.attr-btn-unlabeled {
+  min-width: 72px;
+  padding: 8px 14px;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.attr-btn.is-disabled,
+.attr-btn-chip.is-disabled,
+.attr-btn-inline.is-disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  border-color: #e8edef;
+  color: #b8c0c5;
+  box-shadow: none;
+}
+
+.attr-btn-inline.is-disabled span {
+  color: #b8c0c5;
+}
+
+.attr-btn.is-disabled:hover,
+.attr-btn-chip.is-disabled:hover,
+.attr-btn-inline.is-disabled:hover {
+  border-color: #e8edef;
+}
+
 .option-img-sm {
   width: 28px;
   height: 28px;
@@ -2625,6 +2654,8 @@ img { display: block; max-width: 100%; }
       color: 'Color',
       size: 'Size',
       material: 'Material',
+      style: 'Style',
+      unlabeled: 'Unlabeled',
       qty: 'Qty',
       addToWishlist: '+ add to wishlist',
       description: 'Description',
@@ -2794,6 +2825,8 @@ img { display: block; max-width: 100%; }
       color: '颜色',
       size: '尺寸',
       material: '材质',
+      style: '款式',
+      unlabeled: '未标注',
       qty: '数量',
       addToWishlist: '+ 加入意向清单',
       description: '商品描述',
@@ -3191,6 +3224,293 @@ img { display: block; max-width: 100%; }
     }));
   }
 
+  const UNLABELED = '__UNLABELED__';
+  const UNLABELED_LABEL = '—';
+  const SPEC_DIM_ORDER = ['color', 'size', 'material'];
+  const SPEC_STATE_KEYS = { color: 'selectedColor', size: 'selectedSize', material: 'selectedMaterial' };
+
+  function buildDetailSkus() {
+    const base = {
+      price: 78.56,
+      estDel: '7days',
+      stock: 1000,
+      moq: 5,
+      qty: 0,
+      checked: false,
+      code: 'Current',
+    };
+    return [
+      { ...base, id: 'sku1', skuCode: 'G064-A-LSC25SF047681', item: 'G064-A-LSC25SF047681', image: FURNITURE_IMAGES[0], color: 'Vintage + Black', size: '2.37m', material: 'Oak' },
+      { ...base, id: 'sku2', skuCode: 'G064-A-LSC25SF047682', item: 'G064-A-LSC25SF047682', image: FURNITURE_IMAGES[1], color: 'Vintage + Black', size: '2.37m', material: 'Oak', price: 82.5 },
+      { ...base, id: 'sku3', skuCode: 'G064-A-LSC25SF047683', item: 'G064-A-LSC25SF047683', image: FURNITURE_IMAGES[2], color: 'Vintage + Green', size: '2.72m', material: 'Black Walnut' },
+      { ...base, id: 'sku4', skuCode: 'G064-A-LSC25SF047684', item: 'G064-A-LSC25SF047684', image: FURNITURE_IMAGES[3], color: 'Vintage + Soft Yarn', size: '3.02m', material: 'Oak' },
+      { ...base, id: 'sku5', skuCode: 'G064-A-LSC25SF047685', item: 'G064-A-LSC25SF047685', image: FURNITURE_IMAGES[4], color: '', size: '2.72m', material: '' },
+      { ...base, id: 'sku6', skuCode: 'G064-A-LSC25SF047686', item: 'G064-A-LSC25SF047686', image: FURNITURE_IMAGES[5], color: '', size: '', material: '' },
+    ];
+  }
+
+  function normSpecValue(value) {
+    const text = (value || '').trim();
+    return text || UNLABELED;
+  }
+
+  function isSpecValueEmpty(value) {
+    return !(value || '').trim();
+  }
+
+  function specValueLabel(value) {
+    return value === UNLABELED ? UNLABELED_LABEL : value;
+  }
+
+  function getSpecPresetOrder(p, key) {
+    if (key === 'color') {
+      return (p?.colors || []).map((option) => (typeof option === 'string' ? option : option.label));
+    }
+    if (key === 'size') return p?.sizes || [];
+    if (key === 'material') return p?.materials || [];
+    return [];
+  }
+
+  function getSkuCode(sku) {
+    return sku?.skuCode || sku?.item || '';
+  }
+
+  function escAttr(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+  }
+
+  function getProductSkus(p) {
+    return p?.specRows || state.listModeRows || [];
+  }
+
+  function isDimVisible(skus, key) {
+    return skus.some((sku) => !isSpecValueEmpty(sku[key]));
+  }
+
+  function getVisibleDims(skus) {
+    return {
+      color: isDimVisible(skus, 'color'),
+      size: isDimVisible(skus, 'size'),
+      material: isDimVisible(skus, 'material'),
+    };
+  }
+
+  function getSpecDimOptions(skus, key, p) {
+    if (!isDimVisible(skus, key)) return [];
+    const values = Array.from(new Set(skus.map((sku) => normSpecValue(sku[key]))));
+    const preset = getSpecPresetOrder(p, key);
+    return values.sort((a, b) => {
+      if (a === UNLABELED) return 1;
+      if (b === UNLABELED) return -1;
+      const ai = preset.indexOf(a);
+      const bi = preset.indexOf(b);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return a.localeCompare(b, 'zh-CN');
+    });
+  }
+
+  function buildSpecFilters(state, visible, overrides = {}) {
+    const filters = { ...overrides };
+    if (visible.color && state.selectedColor != null && filters.color === undefined) filters.color = state.selectedColor;
+    if (visible.size && state.selectedSize != null && filters.size === undefined) filters.size = state.selectedSize;
+    if (visible.material && state.selectedMaterial != null && filters.material === undefined) filters.material = state.selectedMaterial;
+    if (state.selectedStyleSkuId != null && filters.skuId === undefined) filters.skuId = state.selectedStyleSkuId;
+    return filters;
+  }
+
+  function getCandidateSkus(skus, filters = {}) {
+    return skus.filter((sku) => {
+      if (filters.color != null && normSpecValue(sku.color) !== filters.color) return false;
+      if (filters.size != null && normSpecValue(sku.size) !== filters.size) return false;
+      if (filters.material != null && normSpecValue(sku.material) !== filters.material) return false;
+      if (filters.skuId != null && sku.id !== filters.skuId) return false;
+      return true;
+    });
+  }
+
+  function getBaseCandidateSkus(skus, state, visible) {
+    const filters = buildSpecFilters(state, visible);
+    delete filters.skuId;
+    return getCandidateSkus(skus, filters);
+  }
+
+  function isSpecOptionSelectable(skus, state, visible, dimKey, dimValue) {
+    const filters = buildSpecFilters(state, visible);
+    delete filters.skuId;
+    filters[dimKey] = dimValue;
+    return getCandidateSkus(skus, filters).length > 0;
+  }
+
+  function isBaseSpecComplete(visible, state) {
+    return (!visible.color || state.selectedColor != null)
+      && (!visible.size || state.selectedSize != null)
+      && (!visible.material || state.selectedMaterial != null);
+  }
+
+  function shouldShowStyleDim(skus, visible, state) {
+    const allBaseHidden = !visible.color && !visible.size && !visible.material;
+    if (allBaseHidden) return skus.length > 1;
+    if (!isBaseSpecComplete(visible, state)) return false;
+    return getBaseCandidateSkus(skus, state, visible).length > 1;
+  }
+
+  function getStyleOptions(skus, visible, state) {
+    const allBaseHidden = !visible.color && !visible.size && !visible.material;
+    if (allBaseHidden) return skus;
+    if (!isBaseSpecComplete(visible, state)) return [];
+    return getBaseCandidateSkus(skus, state, visible);
+  }
+
+  function sanitizeSpecSelections(state, skus, visible, p) {
+    if (!visible.color) state.selectedColor = null;
+    if (!visible.size) state.selectedSize = null;
+    if (!visible.material) state.selectedMaterial = null;
+    SPEC_DIM_ORDER.forEach((key) => {
+      if (!visible[key]) return;
+      const stateKey = SPEC_STATE_KEYS[key];
+      const options = getSpecDimOptions(skus, key, p);
+      if (state[stateKey] != null && !options.includes(state[stateKey])) state[stateKey] = null;
+    });
+    const candidates = getBaseCandidateSkus(skus, state, visible);
+    if (state.selectedStyleSkuId && !candidates.some((sku) => sku.id === state.selectedStyleSkuId)) {
+      state.selectedStyleSkuId = null;
+    }
+  }
+
+  function clearDownstreamSpecSelections(state, changedKey) {
+    const idx = SPEC_DIM_ORDER.indexOf(changedKey);
+    if (idx < 0) return;
+    for (let i = idx + 1; i < SPEC_DIM_ORDER.length; i++) {
+      state[SPEC_STATE_KEYS[SPEC_DIM_ORDER[i]]] = null;
+    }
+    state.selectedStyleSkuId = null;
+    state.resolvedSkuId = null;
+  }
+
+  function onSpecDimSelect(state, dimKey, value) {
+    state[SPEC_STATE_KEYS[dimKey]] = value;
+    clearDownstreamSpecSelections(state, dimKey);
+  }
+
+  function resetSkuSelection(state) {
+    state.selectedColor = null;
+    state.selectedSize = null;
+    state.selectedMaterial = null;
+    state.selectedStyleSkuId = null;
+    state.resolvedSkuId = null;
+  }
+
+  function resolveSelectedSku(state, p) {
+    const skus = getProductSkus(p);
+    const visible = getVisibleDims(skus);
+    const allBaseHidden = !visible.color && !visible.size && !visible.material;
+
+    sanitizeSpecSelections(state, skus, visible, p);
+
+    if (allBaseHidden) {
+      if (skus.length === 1) {
+        state.selectedStyleSkuId = skus[0].id;
+        state.resolvedSkuId = skus[0].id;
+        return skus[0];
+      }
+      const picked = state.selectedStyleSkuId ? skus.find((sku) => sku.id === state.selectedStyleSkuId) : null;
+      state.resolvedSkuId = picked?.id || null;
+      return picked || null;
+    }
+
+    if (!isBaseSpecComplete(visible, state)) {
+      state.selectedStyleSkuId = null;
+      state.resolvedSkuId = null;
+      return null;
+    }
+
+    const candidates = getBaseCandidateSkus(skus, state, visible);
+
+    if (candidates.length === 1) {
+      state.selectedStyleSkuId = candidates[0].id;
+      state.resolvedSkuId = candidates[0].id;
+      return candidates[0];
+    }
+
+    if (candidates.length > 1) {
+      if (state.selectedStyleSkuId) {
+        const picked = candidates.find((sku) => sku.id === state.selectedStyleSkuId);
+        if (picked) {
+          state.resolvedSkuId = picked.id;
+          return picked;
+        }
+        state.selectedStyleSkuId = null;
+      }
+      state.resolvedSkuId = null;
+      return null;
+    }
+
+    state.selectedStyleSkuId = null;
+    state.resolvedSkuId = null;
+    return null;
+  }
+
+  function getColorImgForValue(p, value) {
+    if (value === UNLABELED) return p.gallery?.[0] || p.image || DEFAULT_EMPTY_IMG;
+    const options = (p.colors || []).map((option) => (typeof option === 'string' ? { label: option, img: p.gallery?.[0] } : option));
+    const found = options.find((option) => option.label === value);
+    return found?.img || p.gallery?.[0] || p.image || DEFAULT_EMPTY_IMG;
+  }
+
+  function buildVariationSpecUI(p) {
+    const skus = getProductSkus(p);
+    const visible = getVisibleDims(skus);
+    const resolvedSku = resolveSelectedSku(state, p);
+    const showStyle = shouldShowStyleDim(skus, visible, state);
+    const styleOptions = getStyleOptions(skus, visible, state);
+
+    const renderDimOptions = (key) => {
+      if (!visible[key]) return '';
+      const options = getSpecDimOptions(skus, key, p);
+      const stateKey = SPEC_STATE_KEYS[key];
+      const dataKey = key === 'color' ? 'spec-color' : key === 'size' ? 'spec-size' : 'spec-material';
+      const buttons = options.map((value) => {
+        const active = state[stateKey] === value;
+        const disabled = !isSpecOptionSelectable(skus, state, visible, key, value);
+        const label = specValueLabel(value);
+        if (key === 'color' && value === UNLABELED) {
+          return `<button type="button" class="attr-btn attr-btn-chip attr-btn-unlabeled ${active ? 'active' : ''} ${disabled ? 'is-disabled' : ''}" data-${dataKey}="${escAttr(value)}" ${disabled ? 'disabled' : ''}>${UNLABELED_LABEL}</button>`;
+        }
+        if (key === 'color') {
+          return `<button type="button" class="attr-btn attr-btn-inline ${active ? 'active' : ''} ${disabled ? 'is-disabled' : ''}" data-${dataKey}="${escAttr(value)}" ${disabled ? 'disabled' : ''}><img src="${getColorImgForValue(p, value)}" alt="" class="option-img-sm" /><span>${label}</span></button>`;
+        }
+        return `<button type="button" class="attr-btn attr-btn-chip ${value === UNLABELED ? 'attr-btn-unlabeled' : ''} ${active ? 'active' : ''} ${disabled ? 'is-disabled' : ''}" data-${dataKey}="${escAttr(value)}" ${disabled ? 'disabled' : ''}>${label}</button>`;
+      }).join('');
+      return `
+        <div class="attr-group">
+          <label>${tx(key)}</label>
+          <div class="attr-options ${key === 'color' ? 'attr-options-inline' : ''}">${buttons}</div>
+        </div>
+      `;
+    };
+
+    const styleHtml = showStyle ? `
+      <div class="attr-group attr-group-style">
+        <label>${tx('style')}</label>
+        <div class="attr-options">
+          ${styleOptions.map((sku) => {
+            const active = state.selectedStyleSkuId === sku.id;
+            return `<button type="button" class="attr-btn attr-btn-chip ${active ? 'active' : ''}" data-style-sku="${escAttr(sku.id)}">${getSkuCode(sku)}</button>`;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    return {
+      html: `${renderDimOptions('color')}${renderDimOptions('size')}${renderDimOptions('material')}${styleHtml}`,
+      resolvedSku,
+      visible,
+    };
+  }
+
   const DETAIL_PRODUCT_DATA = {
     displayName: 'Purus Wood Color + White Dining Chair (Set of 2)',
     goodsName: 'Purus Wood Color + White Dining Chair (Set of 2)',
@@ -3231,11 +3551,10 @@ img { display: block; max-width: 100%; }
       { label: 'Vintage + Black', img: FURNITURE_IMAGES[0] },
       { label: 'Vintage + Green', img: FURNITURE_IMAGES[3] },
       { label: 'Vintage + Soft Yarn', img: FURNITURE_IMAGES[5] },
-      { label: 'Other', img: FURNITURE_IMAGES[7] },
+      { label: 'Vintage + Cream White', img: FURNITURE_IMAGES[7] },
     ],
     sizes: ['2.37m', '2.72m', '3.02m'],
     materials: ['Oak', 'Black Walnut'],
-    otherAttrs: ['LS-C001-BK-180 (黑 + 180cm)'],
     dim: '1023mm(L) × 366mm(W) × 1098mm(H)',
     cbm: '0.154m³',
     gw: '46.3kg',
@@ -3299,7 +3618,7 @@ img { display: block; max-width: 100%; }
         image: 'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200&h=760&fit=crop',
       },
     },
-    specRows: buildListModeRows(24),
+    specRows: buildDetailSkus(),
   };
 
   const PRODUCTS = Array.from({ length: 20 }, (_, i) => {
@@ -3410,11 +3729,12 @@ img { display: block; max-width: 100%; }
     detailProduct: PRODUCTS[0],
     detailMode: 'variations',
     saleType: 'stock',
-    selectedColor: 0,
-    selectedSize: 0,
-    selectedMaterial: 0,
+    selectedColor: null,
+    selectedSize: null,
+    selectedMaterial: null,
+    selectedStyleSkuId: null,
+    resolvedSkuId: null,
     detailQty: 0,
-    otherAttrIdx: 0,
     recSeriesSlide: 0,
     recCatSlide1: 0,
     recCatSlide2: 0,
@@ -3490,6 +3810,7 @@ img { display: block; max-width: 100%; }
         state.lifestyleSlide = 0;
         state.detailTab = 'description';
         state.listModeRows = (p.specRows || LIST_MODE_ROWS).map((row) => ({ ...row }));
+        resetSkuSelection(state);
       } else if (p) {
         state.detailProduct = p;
         state.listModeRows = (p.specRows || LIST_MODE_ROWS).map((row) => ({ ...row }));
@@ -3953,7 +4274,11 @@ img { display: block; max-width: 100%; }
     const stockMoq = state.saleType === 'custom' ? (p.customMoq || p.moq) : p.moq;
     const sameSeries = getDetailRecommendations(p, 'series');
     const sameCategory = getDetailRecommendations(p, 'category');
-    const colorOptions = (p.colors || []).map((option) => typeof option === 'string' ? { label: option, img: p.gallery[0] } : option);
+    const specUI = buildVariationSpecUI(p);
+    const activeSku = specUI.resolvedSku;
+    const displayPrice = activeSku?.price ?? p.price;
+    const displayStock = activeSku?.stock ?? p.stock;
+    const displayItem = activeSku ? getSkuCode(activeSku) : p.item;
 
     return renderShell(`
       <div class="container page-detail detail-v2">
@@ -3975,13 +4300,13 @@ img { display: block; max-width: 100%; }
           <div class="detail-info detail-info-updated">
             ${p.tag ? `<span class="tag-badge">${tx('bestsellers')}</span>` : ''}
             <h1 class="detail-title">${name}</h1>
-            <div class="detail-meta detail-code-row">${tx('item')}: ${p.item} <span class="detail-divider">|</span> ${tx('status')}: ${p.status || 'Active'}</div>
+            <div class="detail-meta detail-code-row">${tx('item')}: ${displayItem} <span class="detail-divider">|</span> ${tx('status')}: ${p.status || 'Active'}</div>
             <div class="sale-type sale-type-split ${state.saleType === 'custom' ? 'is-custom' : ''}">
               <button class="pill ${state.saleType === 'stock' ? 'active' : ''}" data-sale="stock">${tx('stock')}</button>
               <button class="pill ${state.saleType === 'custom' ? 'active' : ''}" data-sale="custom">${tx('custom')}</button>
             </div>
             <div class="detail-price-wrap">
-              <div class="detail-price detail-price-usd">${fmt(p.price)}</div>
+              <div class="detail-price detail-price-usd">${fmt(displayPrice)}</div>
             </div>
             <div class="logistics detail-logistics-wrap">
               <div class="detail-logistics-line detail-logistics-row">
@@ -4002,25 +4327,13 @@ img { display: block; max-width: 100%; }
               <button class="mode-tab ${state.detailMode === 'list' ? 'active' : ''}" data-mode="list">${tx('listMode')}</button>
             </div>
             ${state.detailMode === 'variations' ? `
-              <div class="attr-group">
-                <label>${tx('color')}</label>
-                <div class="attr-options attr-options-inline">
-                  ${colorOptions.map((c, i) => `<button class="attr-btn attr-btn-inline ${state.selectedColor === i ? 'active' : ''}" data-color="${i}"><img src="${c.img}" alt="" class="option-img-sm" /><span>${c.label}</span></button>`).join('')}
-                </div>
-              </div>
-              <div class="attr-group"><label>${tx('size')}</label><div class="attr-options">${p.sizes.map((s, i) => `<button class="attr-btn attr-btn-chip ${state.selectedSize === i ? 'active' : ''}" data-size="${i}">${s}</button>`).join('')}</div></div>
-              <div class="attr-group"><label>${tx('material')}</label><div class="attr-options">${p.materials.map((m, i) => `<button class="attr-btn attr-btn-chip ${state.selectedMaterial === i ? 'active' : ''}" data-material="${i}">${m}</button>`).join('')}</div></div>
-              <div class="attr-group"><label>OthAttr</label>
-                <select class="oth-attr-select" id="othAttrSelect">
-                  ${(p.otherAttrs || []).map((v, i) => `<option value="${i}" ${state.otherAttrIdx === i ? 'selected' : ''}>${v}</option>`).join('')}
-                </select>
-              </div>
+              ${specUI.html}
               <div class="qty-row qty-row-ref">
                 <div class="qty-row-main">
                   <label>${tx('qty')}</label>
                   <div class="qty-row-controls">
                     <div class="stepper"><button data-qty="-1">-</button><input type="number" value="${state.detailQty}" id="detailQtyInput" min="0" /><button data-qty="1">+</button></div>
-                    <span class="qty-hint">${tx('moq')}: ${stockMoq} ${tx('pcs')} | ${tx('stock')}: ${p.stock.toLocaleString()} ${tx('pcs')}</span>
+                    <span class="qty-hint">${tx('moq')}: ${stockMoq} ${tx('pcs')} | ${tx('stock')}: ${displayStock.toLocaleString()} ${tx('pcs')}</span>
                   </div>
                 </div>
               </div>
@@ -4624,14 +4937,33 @@ img { display: block; max-width: 100%; }
         : Math.max(0, (state[key] || 0) - 1);
       render();
     }));
-    const othSelect = $('#othAttrSelect');
-    if (othSelect) othSelect.addEventListener('change', () => { state.otherAttrIdx = Number(othSelect.value); });
+    $$('[data-spec-color]').forEach((el) => el.addEventListener('click', () => {
+      if (el.disabled) return;
+      onSpecDimSelect(state, 'color', el.dataset.specColor);
+      resolveSelectedSku(state, state.detailProduct);
+      render();
+    }));
+    $$('[data-spec-size]').forEach((el) => el.addEventListener('click', () => {
+      if (el.disabled) return;
+      onSpecDimSelect(state, 'size', el.dataset.specSize);
+      resolveSelectedSku(state, state.detailProduct);
+      render();
+    }));
+    $$('[data-spec-material]').forEach((el) => el.addEventListener('click', () => {
+      if (el.disabled) return;
+      onSpecDimSelect(state, 'material', el.dataset.specMaterial);
+      resolveSelectedSku(state, state.detailProduct);
+      render();
+    }));
+    $$('[data-style-sku]').forEach((el) => el.addEventListener('click', () => {
+      state.selectedStyleSkuId = el.dataset.styleSku;
+      resolveSelectedSku(state, state.detailProduct);
+      render();
+    }));
     $$('[data-sale]').forEach((el) => el.addEventListener('click', () => {
       state.saleType = el.dataset.sale;
       const p = state.detailProduct;
-      state.selectedColor = 0;
-      state.selectedSize = 0;
-      state.selectedMaterial = 0;
+      resetSkuSelection(state);
       state.detailQty = state.saleType === 'custom' ? (p.customMoq || p.moq) : p.moq;
       render();
     }));
@@ -4645,9 +4977,6 @@ img { display: block; max-width: 100%; }
       }
       render();
     }));
-    $$('[data-color]').forEach((el) => el.addEventListener('click', () => { state.selectedColor = Number(el.dataset.color); render(); }));
-    $$('[data-size]').forEach((el) => el.addEventListener('click', () => { state.selectedSize = Number(el.dataset.size); render(); }));
-    $$('[data-material]').forEach((el) => el.addEventListener('click', () => { state.selectedMaterial = Number(el.dataset.material); render(); }));
     $$('[data-qty]').forEach((el) => el.addEventListener('click', () => {
       const p = state.detailProduct;
       const minQty = state.saleType === 'custom' ? (p.customMoq || p.moq) : 0;
